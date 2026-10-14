@@ -347,9 +347,11 @@ class LymowOAuthStartView(HomeAssistantView):
         if is_apple:
             tip = (
                 '<p style="font-size:13px;color:#666;margin-top:8px;text-align:left">'
-                "Signing in from another device? Use your Apple Account email and "
-                "password plus the 6-digit code. Sign in with iPhone is only offered "
-                "when you sign in on this computer."
+                "<b>Use Chrome for this step</b> &mdash; Safari usually does not show "
+                "the <code>myapp://callback</code> redirect, so you cannot copy the code. "
+                "In Chrome: open DevTools (F12) &rarr; Network &rarr; Preserve log, then "
+                "click Get Code. Already signed into Apple is fine; copy the failed "
+                "<code>callback</code> request URL and paste it in Home Assistant."
                 "</p>"
             )
         page = f"""<!DOCTYPE html><html><head><title>Lymow - Sign in with {provider_label}</title>
