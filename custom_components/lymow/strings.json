@@ -17,10 +17,19 @@
           "password": "Password"
         }
       },
-      "oauth": {
-        "title": "{provider} Login",
-        "description": "Copy this URL and open it in a **new browser tab**:\n\n`{auth_url}`\n\nFollow the steps on that page to sign in with {provider} and get the code, then paste it below.",
+      "google": {
+        "title": "Google Login",
+        "description": "Open [this sign-in page]({auth_url}) in a **new browser tab**, follow the steps to get the code, then paste it below.\n\nOr copy the URL from the field below.",
         "data": {
+          "auth_url": "Sign-in URL (copy & open in a new tab)",
+          "code": "Authorization Code"
+        }
+      },
+      "apple": {
+        "title": "Apple Login",
+        "description": "Open [this sign-in page]({auth_url}) in a **new browser tab**, follow the steps to get the code, then paste it below.\n\nOr copy the URL from the field below.\n\nFrom another device, use your Apple Account email/password plus the 6-digit code.",
+        "data": {
+          "auth_url": "Sign-in URL (copy & open in a new tab)",
           "code": "Authorization Code"
         }
       },

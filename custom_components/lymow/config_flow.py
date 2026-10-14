@@ -55,6 +55,7 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._auth_method = AUTH_METHOD_PASSWORD
         self._oauth_state    = ""
         self._pkce_verifier  = ""
+        self._cached_oauth_url = ""
 
     # ── Step 1: Choose auth method ──────────────────────────────
 
@@ -142,6 +143,8 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.hass.http.register_view(LymowOAuthStartView)
         provider = OAUTH_IDENTITY_PROVIDERS[self._auth_method]
         provider_label = _PROVIDER_LABELS.get(provider, provider)
+        # Use provider-specific step_id so translations always resolve
+        step_id = self._auth_method  # "google" or "apple"
 
         if user_input is not None:
             code = user_input.get("code", "").strip()
@@ -150,14 +153,8 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if m:
                 code = m.group(1)
             if not code:
-                return self.async_show_form(
-                    step_id="oauth",
-                    data_schema=vol.Schema({vol.Required("code"): str}),
-                    errors={"base": "invalid_auth"},
-                    description_placeholders={
-                        "auth_url": self._oauth_url(),
-                        "provider": provider_label,
-                    },
+                return self._show_oauth_form(
+                    step_id, provider_label, errors={"base": "invalid_auth"},
                 )
 
             # Validate state from pasted URL if present
@@ -166,14 +163,8 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if state_match and self._oauth_state:
                 if state_match.group(1) != self._oauth_state:
                     _LOGGER.warning("OAuth state mismatch — possible CSRF")
-                    return self.async_show_form(
-                        step_id="oauth",
-                        data_schema=vol.Schema({vol.Required("code"): str}),
-                        errors={"base": "invalid_auth"},
-                        description_placeholders={
-                            "auth_url": self._oauth_url(),
-                            "provider": provider_label,
-                        },
+                    return self._show_oauth_form(
+                        step_id, provider_label, errors={"base": "invalid_auth"},
                     )
 
             try:
@@ -195,25 +186,13 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             except LymowAuthError as e:
                 _LOGGER.error("%s OAuth failed: %s", provider_label, e)
-                return self.async_show_form(
-                    step_id="oauth",
-                    data_schema=vol.Schema({vol.Required("code"): str}),
-                    errors={"base": "invalid_auth"},
-                    description_placeholders={
-                        "auth_url": self._oauth_url(),
-                        "provider": provider_label,
-                    },
+                return self._show_oauth_form(
+                    step_id, provider_label, errors={"base": "invalid_auth"},
                 )
             except Exception:
                 _LOGGER.exception("Unexpected error during %s OAuth", provider_label)
-                return self.async_show_form(
-                    step_id="oauth",
-                    data_schema=vol.Schema({vol.Required("code"): str}),
-                    errors={"base": "unknown"},
-                    description_placeholders={
-                        "auth_url": self._oauth_url(),
-                        "provider": provider_label,
-                    },
+                return self._show_oauth_form(
+                    step_id, provider_label, errors={"base": "unknown"},
                 )
             else:
                 if not self._devices:
@@ -222,22 +201,23 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return await self._create_entry(self._devices[0])
                 return await self.async_step_select_device()
 
-        return self.async_show_form(
-            step_id="oauth",
-            data_schema=vol.Schema({vol.Required("code"): str}),
-            description_placeholders={
-                "auth_url": self._oauth_url(),
-                "provider": provider_label,
-            },
-        )
+        return self._show_oauth_form(step_id, provider_label)
 
     def _oauth_url(self) -> str:
+        """Build (or reuse) the helper-page URL; keeps PKCE/state stable across redraws."""
+        if self._oauth_state and self._pkce_verifier and getattr(self, "_cached_oauth_url", None):
+            return self._cached_oauth_url
+
         self._oauth_state = secrets.token_urlsafe(32)
         self._pkce_verifier = secrets.token_urlsafe(64)
         code_challenge = base64.urlsafe_b64encode(
             hashlib.sha256(self._pkce_verifier.encode()).digest()
         ).rstrip(b"=").decode()
-        base = self.hass.config.internal_url or "http://homeassistant.local:8123"
+        base = (
+            self.hass.config.internal_url
+            or self.hass.config.external_url
+            or "http://homeassistant.local:8123"
+        )
         provider = OAUTH_IDENTITY_PROVIDERS[self._auth_method]
         qs = urllib.parse.urlencode({
             "region": self._region,
@@ -245,7 +225,29 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "cc": code_challenge,
             "provider": provider,
         })
-        return f"{base}/api/lymow/oauth/start?{qs}"
+        self._cached_oauth_url = f"{base}/api/lymow/oauth/start?{qs}"
+        return self._cached_oauth_url
+
+    def _show_oauth_form(
+        self,
+        step_id: str,
+        provider_label: str,
+        errors: dict[str, str] | None = None,
+    ) -> FlowResult:
+        """Show OAuth form with the sign-in URL as a visible, copyable field."""
+        auth_url = self._oauth_url()
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({
+                vol.Optional("auth_url", default=auth_url): str,
+                vol.Required("code"): str,
+            }),
+            errors=errors or {},
+            description_placeholders={
+                "auth_url": auth_url,
+                "provider": provider_label,
+            },
+        )
 
     def _oauth_redirect_uri(self) -> str:
         # Must use the app's registered redirect URI with trailing slash
