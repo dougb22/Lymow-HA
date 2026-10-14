@@ -1,12 +1,13 @@
-"""Config flow for Lymow — supports email/password AND Google OAuth."""
+"""Config flow for Lymow — supports email/password, Google, and Apple OAuth."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
 import logging
+import re
 import secrets
-from typing import Any
+import urllib.parse
 
 import aiohttp
 import voluptuous as vol
@@ -18,6 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CognitoAuth, LymowAuthError, LymowClient
 from .const import (
+    AUTH_METHOD_APPLE,
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_PASSWORD,
     CONF_AUTH_METHOD,
@@ -25,12 +27,18 @@ from .const import (
     CONF_PASSWORD,
     CONF_REGION,
     DOMAIN,
+    OAUTH_IDENTITY_PROVIDERS,
     REGIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 OAUTH_CALLBACK_PATH = "/api/lymow/oauth/callback"
+
+_PROVIDER_LABELS = {
+    "Google": "Google",
+    "SignInWithApple": "Apple",
+}
 
 
 class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -44,6 +52,7 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._email     = ""
         self._password  = ""
         self._region    = "eu-west-1"
+        self._auth_method = AUTH_METHOD_PASSWORD
         self._oauth_state    = ""
         self._pkce_verifier  = ""
 
@@ -53,8 +62,11 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input:
             method = user_input.get(CONF_AUTH_METHOD, AUTH_METHOD_PASSWORD)
             self._region = user_input[CONF_REGION]
+            self._auth_method = method
             if method == AUTH_METHOD_GOOGLE:
                 return await self.async_step_google()
+            if method == AUTH_METHOD_APPLE:
+                return await self.async_step_apple()
             return await self.async_step_password()
 
         return self.async_show_form(
@@ -64,6 +76,7 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_AUTH_METHOD, default=AUTH_METHOD_PASSWORD): vol.In({
                     AUTH_METHOD_PASSWORD: "Email & Password",
                     AUTH_METHOD_GOOGLE:   "Google Account (OAuth)",
+                    AUTH_METHOD_APPLE:    "Apple Account (OAuth)",
                 }),
             }),
         )
@@ -114,26 +127,37 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # ── Step 2b: Google OAuth flow ──────────────────────────────
+    # ── Step 2b/2c: Federated OAuth (Google / Apple) ────────────
 
     async def async_step_google(self, user_input: dict | None = None) -> FlowResult:
-        """Show the user a link to Google OAuth login."""
-        from homeassistant.components.http import HomeAssistantView
+        self._auth_method = AUTH_METHOD_GOOGLE
+        return await self.async_step_oauth(user_input)
+
+    async def async_step_apple(self, user_input: dict | None = None) -> FlowResult:
+        self._auth_method = AUTH_METHOD_APPLE
+        return await self.async_step_oauth(user_input)
+
+    async def async_step_oauth(self, user_input: dict | None = None) -> FlowResult:
+        """Shared Cognito Hosted UI OAuth flow for Google and Apple."""
         self.hass.http.register_view(LymowOAuthStartView)
-        
+        provider = OAUTH_IDENTITY_PROVIDERS[self._auth_method]
+        provider_label = _PROVIDER_LABELS.get(provider, provider)
+
         if user_input is not None:
             code = user_input.get("code", "").strip()
-            import re
             # Auto-extract code and state from pasted callback URLs
             m = re.search(r'[?&]code=([a-f0-9-]+)', code, re.I)
             if m:
                 code = m.group(1)
             if not code:
                 return self.async_show_form(
-                    step_id="google",
+                    step_id="oauth",
                     data_schema=vol.Schema({vol.Required("code"): str}),
                     errors={"base": "invalid_auth"},
-                    description_placeholders={"auth_url": self._oauth_url()},
+                    description_placeholders={
+                        "auth_url": self._oauth_url(),
+                        "provider": provider_label,
+                    },
                 )
 
             # Validate state from pasted URL if present
@@ -143,10 +167,13 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if state_match.group(1) != self._oauth_state:
                     _LOGGER.warning("OAuth state mismatch — possible CSRF")
                     return self.async_show_form(
-                        step_id="google",
+                        step_id="oauth",
                         data_schema=vol.Schema({vol.Required("code"): str}),
                         errors={"base": "invalid_auth"},
-                        description_placeholders={"auth_url": self._oauth_url()},
+                        description_placeholders={
+                            "auth_url": self._oauth_url(),
+                            "provider": provider_label,
+                        },
                     )
 
             try:
@@ -167,20 +194,26 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._password = ""
 
             except LymowAuthError as e:
-                _LOGGER.error("Google OAuth failed: %s", e)
+                _LOGGER.error("%s OAuth failed: %s", provider_label, e)
                 return self.async_show_form(
-                    step_id="google",
+                    step_id="oauth",
                     data_schema=vol.Schema({vol.Required("code"): str}),
                     errors={"base": "invalid_auth"},
-                    description_placeholders={"auth_url": self._oauth_url()},
+                    description_placeholders={
+                        "auth_url": self._oauth_url(),
+                        "provider": provider_label,
+                    },
                 )
             except Exception:
-                _LOGGER.exception("Unexpected error during Google OAuth")
+                _LOGGER.exception("Unexpected error during %s OAuth", provider_label)
                 return self.async_show_form(
-                    step_id="google",
+                    step_id="oauth",
                     data_schema=vol.Schema({vol.Required("code"): str}),
                     errors={"base": "unknown"},
-                    description_placeholders={"auth_url": self._oauth_url()},
+                    description_placeholders={
+                        "auth_url": self._oauth_url(),
+                        "provider": provider_label,
+                    },
                 )
             else:
                 if not self._devices:
@@ -190,9 +223,12 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_select_device()
 
         return self.async_show_form(
-            step_id="google",
+            step_id="oauth",
             data_schema=vol.Schema({vol.Required("code"): str}),
-            description_placeholders={"auth_url": self._oauth_url()},
+            description_placeholders={
+                "auth_url": self._oauth_url(),
+                "provider": provider_label,
+            },
         )
 
     def _oauth_url(self) -> str:
@@ -202,11 +238,12 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             hashlib.sha256(self._pkce_verifier.encode()).digest()
         ).rstrip(b"=").decode()
         base = self.hass.config.internal_url or "http://homeassistant.local:8123"
-        import urllib.parse
+        provider = OAUTH_IDENTITY_PROVIDERS[self._auth_method]
         qs = urllib.parse.urlencode({
             "region": self._region,
             "state": self._oauth_state,
             "cc": code_challenge,
+            "provider": provider,
         })
         return f"{base}/api/lymow/oauth/start?{qs}"
 
@@ -239,7 +276,7 @@ class LymowConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_EMAIL:      self._email,
                 CONF_PASSWORD:   self._password,
                 CONF_REGION:     self._region,
-                CONF_AUTH_METHOD: AUTH_METHOD_GOOGLE if not self._password else AUTH_METHOD_PASSWORD,
+                CONF_AUTH_METHOD: self._auth_method,
                 "thing_name":    thing,
                 "device_name":   _label(device),
                 "refresh_token": self._auth.refresh_token,
@@ -286,52 +323,70 @@ class LymowOAuthStartView(HomeAssistantView):
             return web.Response(text="Invalid region", status=400)
         state = request.query.get("state", "")
         code_challenge = request.query.get("cc", "")
+        provider = request.query.get("provider", "Google")
+        if provider not in _PROVIDER_LABELS:
+            return web.Response(text="Invalid provider", status=400)
+        provider_label = _PROVIDER_LABELS[provider]
         hass = request.app["hass"]
         session = async_get_clientsession(hass)
         auth = CognitoAuth(region, session)
         auth_url = auth.get_oauth_authorize_url(
             redirect_uri="myapp://callback/",
-            provider="Google",
+            provider=provider,
             state=state or None,
             code_challenge=code_challenge or None,
         )
         safe_url = html_mod.escape(auth_url)
-        page = f"""<!DOCTYPE html><html><head><title>Lymow - Sign in with Google</title>
+        is_apple = provider == "SignInWithApple"
+        accent = "#000" if is_apple else "#1a73e8"
+        accent_hover = "#333" if is_apple else "#1557b0"
+        accent_bg = "#f5f5f5" if is_apple else "#e8f0fe"
+        tip = ""
+        if is_apple:
+            tip = (
+                '<p style="font-size:13px;color:#666;margin-top:8px;text-align:left">'
+                "Signing in from another device? Use your Apple Account email and "
+                "password plus the 6-digit code. Sign in with iPhone is only offered "
+                "when you sign in on this computer."
+                "</p>"
+            )
+        page = f"""<!DOCTYPE html><html><head><title>Lymow - Sign in with {provider_label}</title>
 <style>
 body{{font-family:-apple-system,sans-serif;display:flex;justify-content:center;
      align-items:center;min-height:100vh;margin:0;background:#f0f2f5}}
 .card{{background:#fff;border-radius:16px;padding:40px;max-width:580px;width:90%;
       box-shadow:0 4px 24px rgba(0,0,0,.12);text-align:center}}
-h2{{color:#1a73e8;margin-bottom:8px}}
+h2{{color:{accent};margin-bottom:8px}}
 .sub{{color:#666;margin-bottom:24px}}
-.btn{{background:#1a73e8;color:#fff;border:none;padding:14px 28px;border-radius:8px;
+.btn{{background:{accent};color:#fff;border:none;padding:14px 28px;border-radius:8px;
      font-size:16px;cursor:pointer;display:inline-block}}
-.btn:hover{{background:#1557b0}}
-.btn2{{background:#fff;color:#1a73e8;border:2px solid #1a73e8;padding:12px 24px;border-radius:8px;
+.btn:hover{{background:{accent_hover}}}
+.btn2{{background:#fff;color:{accent};border:2px solid {accent};padding:12px 24px;border-radius:8px;
       font-size:15px;cursor:pointer;display:inline-block}}
-.btn2:hover{{background:#e8f0fe}}
-.code-box{{font-size:15px;padding:14px;width:100%;border:2px solid #1a73e8;border-radius:8px;
+.btn2:hover{{background:{accent_bg}}}
+.code-box{{font-size:15px;padding:14px;width:100%;border:2px solid {accent};border-radius:8px;
           margin:12px 0;font-family:monospace;text-align:center;box-sizing:border-box}}
 .ok{{color:#0d652d;background:#e6f4ea;padding:16px;border-radius:8px;margin-top:16px}}
 .step{{background:#f8f9fa;border-radius:8px;padding:16px;margin:12px 0;text-align:left;line-height:2}}
-.step b{{color:#1a73e8}}
+.step b{{color:{accent}}}
 kbd{{background:#e8e8e8;border:1px solid #b4b4b4;border-radius:3px;padding:2px 6px;font-size:13px}}
 </style></head>
 <body><div class="card">
-<h2>Lymow + Google</h2>
-<p class="sub">Connect your Lymow account via Google sign-in</p>
+<h2>Lymow + {provider_label}</h2>
+<p class="sub">Connect your Lymow account via {provider_label} sign-in</p>
 <input type="hidden" id="au" value="{safe_url}">
 
 <div class="step">
-  <b>1.</b> If not signed into Google yet, click <b>Sign in</b> first (opens new tab).<br>
+  <b>1.</b> If not signed into {provider_label} yet, click <b>Sign in</b> first (opens new tab).<br>
   &nbsp;&nbsp;&nbsp;&nbsp;The tab may keep loading after sign-in &mdash; that is normal. Just close it.<br>
   <b>2.</b> Press <kbd>F12</kbd> &rarr; <b>Network</b> tab &rarr; check <b>Preserve log</b><br>
   <b>3.</b> Click <b>Get Code</b> (navigates this tab &mdash; keep DevTools open!)<br>
   <b>4.</b> Find <code>callback</code> in Network tab &rarr; right-click &rarr; <b>Copy URL</b><br>
   <b>5.</b> Go back to <b>Home Assistant</b> and paste it in the code field
 </div>
+{tip}
 <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0">
-  <button class="btn2" onclick="signIn()">Sign in with Google &nearr;</button>
+  <button class="btn2" onclick="signIn()">Sign in with {provider_label} &nearr;</button>
   <button class="btn" onclick="getCode()">Get Code</button>
 </div>
 <p style="font-size:13px;color:#888">

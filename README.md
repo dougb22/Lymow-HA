@@ -34,11 +34,8 @@ Control your robot, monitor its status, view zones and map — all from Home Ass
 ## Requirements
 
 - Home Assistant **2024.1** or newer
-- A Lymow account created with **email and password** or Google login
+- A Lymow account created with **email and password**, Google, or Apple login
 - Your robot must be paired to that account via the official Lymow app
-
-> ⚠️ **Apple login is not supported.**  
-> Those accounts use OAuth2 with a mobile deep link (`myapp://callback`) that cannot be replicated in a headless environment.  
 
 ---
 
@@ -83,6 +80,7 @@ Or manually:
 |--------------|--------| ----- |
 | Email & Password | Lymow account used to log into official Lymow app | <ol><li>Enter email address and password used to login to the Lymow app</li></ol> |
 | Google Account (OAuth) | Google login used in official Lymow app | <ol><li>Copy the provided URL and open it in a new browser tab</li> <li>Follow the steps on that page to sign in and get the authorization code, then paste it in the box</li></ol> |
+| Apple Account (OAuth) | Apple login used in official Lymow app | <ol><li>Copy the provided URL and open it in a new browser tab</li> <li>Follow the steps on that page to sign in and get the authorization code, then paste it in the box</li> <li>From another device, use Apple Account email/password plus the 6-digit code (Sign in with iPhone is only offered on the HA host machine)</li></ol> |
 
 4. If multiple robots are found, select which one to add.
 5. Done — entities will appear under the Lymow device.
@@ -276,8 +274,9 @@ Logs will appear in **Settings → System → Logs**.
 → Make sure you restarted Home Assistant after copying the files.
 
 **Login fails**  
-→ Confirm you are using an account created with **email and password**, not Google or Apple.  
-→ Try logging in with the same credentials in the official Lymow app to verify they are correct.
+→ Confirm you chose the same login method as the official Lymow app (email/password, Google, or Apple) and the correct region.  
+→ Try logging in with the same credentials in the official Lymow app to verify they are correct.  
+→ For Google/Apple OAuth, paste the full `myapp://callback` URL or the authorization code quickly — codes expire in about 60 seconds.
 
 **All sensors unavailable**  
 → The robot may be offline or out of WiFi/4G range. Check the **Online** binary sensor.  

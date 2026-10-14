@@ -17,9 +17,9 @@
           "password": "Password"
         }
       },
-      "google": {
-        "title": "Google Login",
-        "description": "Copy this URL and open it in a **new browser tab**:\n\n`{auth_url}`\n\nFollow the steps on that page to sign in and get the code, then paste it below.",
+      "oauth": {
+        "title": "{provider} Login",
+        "description": "Copy this URL and open it in a **new browser tab**:\n\n`{auth_url}`\n\nFollow the steps on that page to sign in with {provider} and get the code, then paste it below.",
         "data": {
           "code": "Authorization Code"
         }

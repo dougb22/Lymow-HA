@@ -10,6 +10,13 @@ CONF_AUTH_METHOD = "auth_method"
 
 AUTH_METHOD_PASSWORD = "password"
 AUTH_METHOD_GOOGLE   = "google"
+AUTH_METHOD_APPLE    = "apple"
+
+# Cognito Hosted UI identity_provider values for federated login
+OAUTH_IDENTITY_PROVIDERS: dict[str, str] = {
+    AUTH_METHOD_GOOGLE: "Google",
+    AUTH_METHOD_APPLE:  "SignInWithApple",
+}
 
 # Cognito Hosted UI domains (discovered via OpenID configuration endpoint)
 COGNITO_DOMAINS: dict[str, str] = {

@@ -145,7 +145,7 @@ class CognitoAuth:
         self._email:    str | None = None
         self._password: str | None = None
 
-    # ── OAuth (Google / hosted UI) ─────────────────────────────
+    # ── OAuth (Google / Apple / hosted UI) ─────────────────────
 
     def get_oauth_authorize_url(
         self,

@@ -13,6 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CognitoAuth, LymowClient
 from .const import (
+    AUTH_METHOD_APPLE,
     AUTH_METHOD_GOOGLE,
     CONF_AUTH_METHOD,
     CONF_EMAIL,
@@ -70,8 +71,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             await auth.ensure_valid(email or None, password or None)
         except Exception:
-            if auth_method == AUTH_METHOD_GOOGLE:
-                _LOGGER.error("Google OAuth tokens expired for %s — reconfigure the integration", thing_name)
+            if auth_method in (AUTH_METHOD_GOOGLE, AUTH_METHOD_APPLE):
+                _LOGGER.error(
+                    "%s OAuth tokens expired for %s — reconfigure the integration",
+                    auth_method.capitalize(),
+                    thing_name,
+                )
                 raise
             _LOGGER.warning("Stored tokens invalid for %s — re-logging in", thing_name)
             await auth.login(email, password)
