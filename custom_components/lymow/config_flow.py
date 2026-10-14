@@ -347,11 +347,10 @@ class LymowOAuthStartView(HomeAssistantView):
         if is_apple:
             tip = (
                 '<p style="font-size:13px;color:#666;margin-top:8px;text-align:left">'
-                "<b>Use Chrome for this step</b> &mdash; Safari usually does not show "
-                "the <code>myapp://callback</code> redirect, so you cannot copy the code. "
-                "In Chrome: open DevTools (F12) &rarr; Network &rarr; Preserve log, then "
-                "click Get Code. Already signed into Apple is fine; copy the failed "
-                "<code>callback</code> request URL and paste it in Home Assistant."
+                "<b>Safari tip:</b> if Network does not show <code>myapp://callback</code>, "
+                "check the <b>Console</b> tab after Get Code &mdash; the callback URL (with "
+                "<code>code=</code>) is often logged there. Copy that into Home Assistant. "
+                "Already signed into Apple is fine."
                 "</p>"
             )
         page = f"""<!DOCTYPE html><html><head><title>Lymow - Sign in with {provider_label}</title>
@@ -383,9 +382,9 @@ kbd{{background:#e8e8e8;border:1px solid #b4b4b4;border-radius:3px;padding:2px 6
 <div class="step">
   <b>1.</b> If not signed into {provider_label} yet, click <b>Sign in</b> first (opens new tab).<br>
   &nbsp;&nbsp;&nbsp;&nbsp;The tab may keep loading after sign-in &mdash; that is normal. Just close it.<br>
-  <b>2.</b> Press <kbd>F12</kbd> &rarr; <b>Network</b> tab &rarr; check <b>Preserve log</b><br>
+  <b>2.</b> Open DevTools (<kbd>F12</kbd> / <kbd>⌥⌘I</kbd>) &rarr; <b>Network</b> + <b>Console</b> &rarr; check <b>Preserve log</b><br>
   <b>3.</b> Click <b>Get Code</b> (navigates this tab &mdash; keep DevTools open!)<br>
-  <b>4.</b> Find <code>callback</code> in Network tab &rarr; right-click &rarr; <b>Copy URL</b><br>
+  <b>4.</b> Copy the <code>myapp://callback/?code=...</code> URL from <b>Network</b> (callback request) or <b>Console</b><br>
   <b>5.</b> Go back to <b>Home Assistant</b> and paste it in the code field
 </div>
 {tip}
